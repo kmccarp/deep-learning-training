@@ -12,19 +12,28 @@ public class ImageGenerator {
     private static final int IMAGE_WIDTH = 255;
     private static final int IMAGE_HEIGHT = 255;
     public static final double LINE_STEP = 0.01;
+    public static final int FILES_TO_GENERATE = 10000;
 
-    public static void generateImage(Path outputPath) throws Exception {
+    public static void generateImage(int numHexagons, Path outputPath) throws Exception {
         BufferedImage image = new BufferedImage(IMAGE_WIDTH, IMAGE_HEIGHT, BufferedImage.TYPE_INT_RGB);
 
         int solidColor = randomColor();
-        int shapeColor = randomColor();
-        while (Math.abs(shapeColor - solidColor) <= 100) {
-            shapeColor = randomColor();
-        }
         fillImage(image, solidColor);
+        for (int i = 0; i < numHexagons; i++) {
+            int shapeColor = randomColor();
+            while (Math.abs(shapeColor - solidColor) <= 100) {
+                shapeColor = randomColor();
+            }
+            generateHexagon(image, shapeColor);
+        }
 
+
+        ImageIO.write(image, "png", outputPath.toFile());
+    }
+
+    private static void generateHexagon(BufferedImage image, int shapeColor) throws Exception {
         // draw shape
-        int lineLength = randInt(25, 25);
+        int lineLength = randInt(50, 50);
 
         // in a right triangle with two equal-length sides, and then a lineWidth hypotenuse,
         //  lineWidth is c, so solve for a and b (or in this case, a)
@@ -32,7 +41,13 @@ public class ImageGenerator {
 
         int zeroX = randInt(lineLength + calculatedDistance, IMAGE_WIDTH - lineLength - calculatedDistance);
         int zeroY = randInt(lineLength + calculatedDistance, IMAGE_HEIGHT - lineLength - calculatedDistance);
+        drawShape(image, shapeColor, lineLength, calculatedDistance, zeroX, zeroY);
 
+        // fill image
+        fill(image, zeroX + 1, zeroY + 1, shapeColor);
+    }
+
+    private static void drawShape(BufferedImage image, int shapeColor, int lineLength, int calculatedDistance, int zeroX, int zeroY) {
         // initialize hex points
         int[][] hexPoints = new int[][]{
                 new int[]{zeroX, zeroY}, // top left
@@ -46,7 +61,6 @@ public class ImageGenerator {
         for (int i = 0; i < hexPoints.length; i++) {
             int[] hexPointA = hexPoints[i];
             int[] hexPointB = hexPoints[(i + 1) % hexPoints.length];
-            System.out.println("Drawing line between points " + i + " and " + (i + 1));
 
             // draw line from hexPointA to hexPointB
             double x = hexPointA[0];
@@ -56,13 +70,7 @@ public class ImageGenerator {
                 x += (hexPointB[0] - hexPointA[0]) / (lineLength * 2.0);
                 y += (hexPointB[1] - hexPointA[1]) / (lineLength * 2.0);
             }
-            System.out.println("Moving to point " + (i + 1));
         }
-
-        // fill image
-        fill(image, zeroX + 1, zeroY + 1, shapeColor);
-
-        ImageIO.write(image, "png", outputPath.toFile());
     }
 
     private static void fillImage(BufferedImage image, int solidColor) {
@@ -87,76 +95,45 @@ public class ImageGenerator {
         enqueue(queue, new Pixel(x, y));
         int startingColor = image.getRGB(x, y);
 
-        if (startingColor == color) {
-            throw new IllegalArgumentException("Oh noes");
+        boolean[][] visited = new boolean[IMAGE_WIDTH][IMAGE_HEIGHT];
+        for (int i = 0; i < visited.length; i++) {
+            for (int j = 0; j < visited[i].length; j++) {
+                visited[i][j] = false;
+            }
         }
 
-        HashSet<Pixel> visited = new HashSet<>();
-
         while (!queue.isEmpty()) {
-            System.out.println("Queue has " + queue.size() + " elements in it");
+            // poll front of queue
             Pixel top = queue.poll();
-            int oldColor = image.getRGB(top.x, top.y);
-            image.setRGB(top.x, top.y, color);
-            int newColor = image.getRGB(top.x, top.y);
-            if (oldColor == newColor) {
-                throw new IllegalArgumentException(
-                        "Pixel (" + top.x + "," + top.y + "), which has " + (visited.contains(top) ? "" : " not") + "been seen,"
-                                + " failed its color check.");
-            }
-            visited.add(new Pixel(top.x, top.y));
+            if (visited[top.x][top.y])
+                continue; // TODO why do we need this line?
 
-            // add all pixels nearby
-            Collection<Pixel> e = new ArrayList<>();
-            if (top.y > 0) {
-                if (top.x > 0 && top.y > 0) e.add(new Pixel(top.x - 1, top.y - 1));
-                if (top.y > 0) e.add(new Pixel(top.x, top.y - 1));
-                if (top.x < IMAGE_WIDTH - 1) e.add(new Pixel(top.x + 1, top.y - 1));
-            }
-            if (top.x > 0) e.add(new Pixel(top.x - 1, top.y));
-            if (top.x < IMAGE_WIDTH - 1) e.add(new Pixel(top.x + 1, top.y));
-            if (top.y < IMAGE_HEIGHT - 1) {
-                if (top.x > 0) e.add(new Pixel(top.x - 1, top.y + 1));
-                e.add(new Pixel(top.x, top.y + 1));
-                if (top.x < IMAGE_WIDTH - 1) e.add(new Pixel(top.x + 1, top.y + 1));
-            }
-            for (Pixel pixel : e) {
-                // TODO there seems to be a bug at this line but i can't figure out why
-                if (!visited.contains(pixel) && image.getRGB(pixel.x, pixel.y) == startingColor) {
-                    enqueue(queue, pixel);
+            // set color to new color, mark visited
+            image.setRGB(top.x, top.y, color);
+            visited[top.x][top.y] = true;
+
+            // enqueue north neighbor, west neighbor, south neighbor, and east neighbor
+            Collection<Pixel> pixelsToAdd = new LinkedList<>();
+            if (top.y > 0) pixelsToAdd.add(new Pixel(top.x, top.y - 1)); // north
+            if (top.x < IMAGE_WIDTH - 1) pixelsToAdd.add(new Pixel(top.x + 1, top.y)); // east
+            if (top.y < IMAGE_HEIGHT - 1) pixelsToAdd.add(new Pixel(top.x, top.y + 1)); // south
+            if (top.x > 0) pixelsToAdd.add(new Pixel(top.x - 1, top.y)); // west
+            for (Pixel newPixel : pixelsToAdd) {
+                if (!visited[newPixel.x][newPixel.y] && image.getRGB(newPixel.x, newPixel.y) == startingColor) {
+                    enqueue(queue, newPixel);
                 }
             }
         }
     }
 
     private static boolean enqueue(Queue<Pixel> queue, Pixel e) {
-//        System.out.println("Adding pixel (" + e.x + "," + e.y + ")");
         return queue.add(e);
     }
 
     private static class Pixel {
-        public Pixel(int x, int y) {
+        Pixel(int x, int y) {
             this.x = x;
             this.y = y;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-
-            Pixel pixel = (Pixel) o;
-
-            if (x != pixel.x) return false;
-            return y == pixel.y;
-
-        }
-
-        @Override
-        public int hashCode() {
-            int result = x;
-            result = 31 * result + y;
-            return result;
         }
 
         private int x;
@@ -164,16 +141,17 @@ public class ImageGenerator {
     }
 
     private static int randInt(int min, int max) {
-        int retVal = (int) Math.floor(Math.random() * (max - min) + min);
-        System.out.println("Between " + min + " and " + max + ", we got " + retVal);
-        return retVal;
+        return (int) Math.floor(Math.random() * (max - min) + min);
     }
 
     public static void main(String[] args) throws Exception {
-        String pathEnd = UUID.randomUUID().toString().replace("-", "").substring(0, 5);
-//        File imageFilePath = new File("./images/generatedImage" + pathEnd + ".png");
-        File imageFilePath = new File("./images/generatedImage.png");
-        imageFilePath.mkdirs();
-        generateImage(imageFilePath.toPath());
+        for (int i = 0; i < FILES_TO_GENERATE; i++) {
+            int numHexagons = (int) Math.round(Math.random() * 3);
+            String pathEnd = UUID.randomUUID().toString().replace("-", "").substring(0, 5);
+            String filePath = "./images/" + numHexagons + "/generatedImage" + pathEnd + ".png";
+            File imageFilePath = new File(filePath);
+            imageFilePath.mkdirs();
+            generateImage(numHexagons, imageFilePath.toPath());
+        }
     }
 }
